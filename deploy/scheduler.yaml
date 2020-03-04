@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: codis-scheduler
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: codis-scheduler-bind
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: codis-scheduler
+    namespace: kube-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scheduler-extend-config
+  namespace: kube-system
+data:
+  config.yaml: |
+    apiVersion: kubescheduler.config.k8s.io/v1alpha1
+    kind: KubeSchedulerConfiguration
+    schedulerName: codis-scheduler
+    algorithmSource:
+      policy:
+        configMap:
+          name: scheduler-extend-policy
+          namespace: kube-system
+    leaderElection:
+      leaderElect: true
+      lockObjectName: codis-scheduler
+      lockObjectNamespace: kube-system
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: scheduler-extend-policy
+  namespace: kube-system
+data:
+  policy.cfg: |
+    {
+      "kind": "Policy",
+      "apiVersion": "v1",
+      "predicates" : [
+        {"name" : "PodFitsHostPorts"},
+        {"name" : "PodFitsResources"},
+        {"name" : "NoDiskConflict"},
+        {"name" : "MatchNodeSelector"},
+        {"name" : "HostName"}
+      ],
+      "priorities" : [
+        {"name" : "LeastRequestedPriority", "weight" : 1},
+        {"name" : "BalancedResourceAllocation", "weight" : 1},
+        {"name" : "ServiceSpreadingPriority", "weight" : 1},
+        {"name" : "EqualPriority", "weight" : 1}
+      ],
+      "extenders": [
+        {
+          "urlPrefix": "http://localhost:8880",
+          "filterVerb": "predicate",
+          "prioritizeVerb": "prioritize",
+          "weight": 5,
+          "enableHttps": false,
+          "nodeCacheCapable": false
+        }
+      ]
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: codis-scheduler
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: codis-scheduler
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: codis-scheduler
+    spec:
+      serviceAccountName: codis-scheduler
+      containers:
+        - name: codis-scheduler
+          image: gcr.azk8s.cn/google-containers/kube-scheduler:v1.16.2
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 10251
+          command:
+            - kube-scheduler
+          args:
+            - --config=/scheduler/config.yaml
+          volumeMounts:
+            - name: config
+              mountPath: /scheduler
+        - name: extend-srv
+          image: oarfah/codis-scheduler:v0.1
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8880
+      volumes:
+        - name: config
+          configMap:
+            name: scheduler-extend-config

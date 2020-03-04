@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: nginx
+spec:
+  selector:
+    matchLabels:
+      app: nginx
+  replicas: 20
+  serviceName: "nginx"
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      schedulerName: codis-scheduler
+      nodeSelector:
+        nginx: test
+      containers:
+        - name: nginx
+          image: nginx
+          imagePullPolicy: IfNotPresent
